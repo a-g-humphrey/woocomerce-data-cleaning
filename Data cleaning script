@@ -1,0 +1,48 @@
+## Script to extract data from woocomerce in a standardised fashion
+
+library(tidyverse)
+library(readr)
+
+## Transform the Products listings data so thats is useful for processing purposes 
+
+products <- read_csv("Downloads/wc-product-export-16-7-2021-1626444550701.csv")
+
+
+products_output <- products %>%
+  filter(Published == 1)%>%
+  select(ID, Type,Name,`Regular price`,Parent)%>%
+  mutate(Parent = str_match(Parent,'\\d+')[,1])%>%
+  rename(SKU=ID,Description = Name)
+
+write.csv(products_output,"woocomerce_products_data.csv")
+
+##---------------##
+## Draw in sales data and convert it to a useable format
+
+import_data <- read_csv("Downloads/orders_2021-07-16_page-wc-admin_path--analytics-orders_period-year_compare-previous-year_per-page-100.csv")
+
+df <- import_data %>% mutate(quantity_purchases = str_match_all(`Product(s)`,pattern = '\\d(?=×)')) %>%
+  unnest(quantity_purchases)%>%
+  mutate(index = row_number())
+
+df_2 <- import_data %>%
+  mutate(purchases = strsplit(`Product(s)`,split = ', \\d|\\d×|×  |×'))%>%
+  unnest(purchases)%>%
+  mutate(purchases = str_trim(purchases,side = "left")) %>%
+  filter(purchases != "")%>%
+  mutate(index = row_number())
+
+df_3 <- df %>%
+  select(index, quantity_purchases)%>%
+  left_join(df_2)
+
+output <- df_3 %>%
+  select(-index,-`Coupon(s)`,-`Product(s)`,-`Customer Type`)%>%
+  rename(Description = purchases, Quantity = quantity_purchases,Order_Total_Revenue = `Net Sales`,
+         Order_Item_Qty = `Items Sold`)%>%
+  group_by(`Order #`)%>%
+  mutate(rel_no = row_number())%>%
+  select(rel_no,`Order #`,Date,Status, Customer,Description,Quantity,everything())%>%
+  left_join(products_output)
+  
+write.csv(output, "woocomerce_sales_data.csv")
